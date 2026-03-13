@@ -19,9 +19,9 @@ def run_ai_predictor(state: dict) -> dict:
 
     # Compile all data from previous agents
     products_info = "\n".join([
-        f"- {p['title']}: {p['content'][:200]}"
-        for p in state.get("products_found", [])
-    ])
+    f"- {p['title']} | Price: {p.get('price','N/A')} | Rating: {p.get('rating','N/A')} | Reviews: {p.get('reviews','N/A')}"
+    for p in state.get("products_found", [])
+])
 
     history_info = "\n".join([
         f"- {h['title']}: {h['content'][:200]}"
@@ -39,9 +39,9 @@ def run_ai_predictor(state: dict) -> dict:
     ])
 
     alternatives_info = "\n".join([
-        f"- {a['title']}: {a['content'][:200]}"
-        for a in state.get("alternatives_found", [])
-    ])
+    f"- {a['title']} | Price: {a.get('price','N/A')} | Rating: {a.get('rating','N/A')}"
+    for a in state.get("alternatives_found", [])
+])
 
     # Ask LLM to analyze everything
     response = llm.invoke([
