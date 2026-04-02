@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SmartShop AI - Price Intelligence Assistant</title>
+  <meta name="description" content="SmartShop AI helps users compare prices and identify genuine discounts across major marketplaces.">
+  <style>
+    :root {
+      --bg: #f7f5ef;
+      --card: #fffdf7;
+      --ink: #1e1f1a;
+      --muted: #59604e;
+      --brand: #0f6b4f;
+      --accent: #f6b329;
+      --border: #d7d2c4;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 20% 10%, #fff 0%, transparent 25%),
+        radial-gradient(circle at 80% 0%, #fff8dc 0%, transparent 22%),
+        var(--bg);
+      line-height: 1.6;
+    }
+
+    .wrap {
+      width: min(980px, 92vw);
+      margin: 0 auto;
+      padding: 20px 0 44px;
+    }
+
+    .hero {
+      margin-top: 18px;
+      padding: 28px;
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      background: linear-gradient(135deg, #f3f7e9, #fff7df);
+    }
+
+    h1 {
+      margin: 0 0 10px;
+      font-size: clamp(30px, 6vw, 52px);
+      letter-spacing: -1px;
+      line-height: 1.1;
+    }
+
+    .tag {
+      display: inline-block;
+      margin-bottom: 14px;
+      padding: 6px 10px;
+      font-weight: 600;
+      color: #103f2f;
+      background: #d9f4e8;
+      border: 1px solid #9dd3bf;
+      border-radius: 999px;
+      font-size: 13px;
+    }
+
+    .lead {
+      max-width: 760px;
+      font-size: 18px;
+      color: var(--muted);
+      margin: 0;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 14px;
+      margin-top: 22px;
+    }
+
+    .card {
+      padding: 16px;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: var(--card);
+    }
+
+    .card h3 {
+      margin: 0 0 8px;
+      font-size: 17px;
+    }
+
+    section {
+      margin-top: 20px;
+      padding: 22px;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: var(--card);
+    }
+
+    h2 {
+      margin: 0 0 10px;
+      font-size: 24px;
+      letter-spacing: -0.3px;
+    }
+
+    ul {
+      margin: 8px 0 0;
+      padding-left: 18px;
+    }
+
+    .disclosure {
+      border-left: 5px solid var(--accent);
+      background: #fff8e8;
+    }
+
+    .footer {
+      margin-top: 20px;
+      font-size: 14px;
+      color: var(--muted);
+      text-align: center;
+    }
+
+    a {
+      color: var(--brand);
+      text-decoration: none;
+      font-weight: 600;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <header class="hero">
+      <span class="tag">Public Product Website</span>
+      <h1>SmartShop AI</h1>
+      <p class="lead">
+        SmartShop AI helps users discover better buying opportunities by tracking price movement,
+        classifying deal quality, and suggesting when to buy now versus wait.
+      </p>
+      <div class="grid">
+        <article class="card">
+          <h3>Direct-Link First</h3>
+          <p>Recommendations prioritize direct store links so the platform works even without affiliate onboarding.</p>
+        </article>
+        <article class="card">
+          <h3>Deal Signal Engine</h3>
+          <p>Deals are labeled with transparent logic such as Genuine Bargain, Fake Discount, or Normal.</p>
+        </article>
+        <article class="card">
+          <h3>Multi-Market Tracking</h3>
+          <p>Price data is collected across major marketplaces to compare trend and availability.</p>
+        </article>
+      </div>
+    </header>
+
+    <section>
+      <h2>How This Service Is Used</h2>
+      <p>
+        This website represents the SmartShop AI recommendation service where users can view product insights,
+        price history context, and outbound product links.
+      </p>
+      <ul>
+        <li>Users can browse recommendations generated from tracked products.</li>
+        <li>Users can click outbound product links to view items on marketplace websites.</li>
+        <li>Selected links may include referral parameters when available.</li>
+      </ul>
+    </section>
+
+    <section class="disclosure" id="affiliate-disclosure">
+      <h2>Affiliate Disclosure</h2>
+      <p>
+        Some outbound links on SmartShop AI may be affiliate links. If a qualifying purchase is made,
+        SmartShop AI may receive a commission at no extra cost to the user.
+      </p>
+      <p>
+        This does not change product pricing shown to users, and recommendations are based on deal analysis,
+        not commission priority.
+      </p>
+    </section>
+
+    <section id="privacy">
+      <h2>Privacy Summary</h2>
+      <ul>
+        <li>We use minimal account and usage data to generate recommendations and alerts.</li>
+        <li>We do not sell personal data.</li>
+        <li>Users can request data deletion by contacting us.</li>
+      </ul>
+    </section>
+
+    <section id="contact">
+      <h2>Contact</h2>
+      <p>
+        Email: <a href="mailto:neelsyedabdulrehaman@gmail.com">neelsyedabdulrehaman@gmail.com</a>
+      </p>
+      <p>
+        Project repository: <a href="https://github.com/abdul6990/smartshop-ai" target="_blank" rel="noopener noreferrer">github.com/abdul6990/smartshop-ai</a>
+      </p>
+      <p>
+        Last updated: April 2026
+      </p>
+    </section>
+
+    <p class="footer">
+      SmartShop AI - price intelligence for smarter purchases.
+    </p>
+  </main>
+</body>
+</html>
