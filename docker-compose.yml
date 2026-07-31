@@ -1,0 +1,89 @@
+# docker-compose.yml — SmartShop AI local + production-mirror stack
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: smartshop-db
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-smartshop_ai}
+      POSTGRES_USER: ${POSTGRES_USER:-smartshop_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-smartshop_user}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: smartshop-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # FastAPI Backend
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: smartshop-api
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-smartshop_user}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-smartshop_ai}
+      REDIS_URL: redis://redis:6379/0
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_KEY: ${SUPABASE_KEY}
+      COHERE_API_KEY: ${COHERE_API_KEY}
+      COHERE_MODEL_NAME: ${COHERE_MODEL_NAME:-command-a-03-2025}
+      TAVILY_API_KEY: ${TAVILY_API_KEY}
+      EMAIL_ADDRESS: ${EMAIL_ADDRESS}
+      EMAIL_PASSWORD: ${EMAIL_PASSWORD}
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN}
+      TWILIO_WHATSAPP_NUMBER: ${TWILIO_WHATSAPP_NUMBER}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:8081}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      PORT: 8000
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./:/app
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
+
+  # Price scraper (runs as background job)
+  scraper:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: smartshop-scraper
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-smartshop_user}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-smartshop_ai}
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ./:/app
+    command: python utils/scheduler.py
+
+volumes:
+  postgres_data:
+
+networks:
+  default:
+    name: smartshop-network
