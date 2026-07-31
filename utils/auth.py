@@ -1,11 +1,14 @@
 import os
 import random
 import string
+import hashlib
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from supabase import create_client
 
 load_dotenv()
+
+_OTP_MEMORY_STORE: dict[str, dict[str, str]] = {}
 
 def get_supabase():
     return create_client(
@@ -16,14 +19,200 @@ def get_supabase():
 def generate_otp() -> str:
     return ''.join(random.choices(string.digits, k=6))
 
-def send_otp_email(email: str, otp: str) -> bool:
+
+def _store_otp_in_memory(email: str, otp: str, expires_at: str) -> None:
+    _OTP_MEMORY_STORE[email.lower()] = {
+        "otp": otp,
+        "otp_expires_at": expires_at,
+    }
+
+
+def _load_otp_from_memory(email: str) -> dict | None:
+    return _OTP_MEMORY_STORE.get(email.lower())
+
+
+def _clear_otp_from_memory(email: str) -> None:
+    _OTP_MEMORY_STORE.pop(email.lower(), None)
+
+
+def _parse_verification_token(token: str) -> tuple[str | None, str | None]:
+    if not token or "|" not in token:
+        return None, None
+    otp_code, expires_at = token.split("|", 1)
+    otp_code = otp_code.strip()
+    expires_at = expires_at.strip()
+    if not otp_code or not expires_at:
+        return None, None
+    return otp_code, expires_at
+
+
+def _parse_iso_datetime(value: str) -> datetime:
+    if value.endswith("Z"):
+        value = value.replace("Z", "+00:00")
+    return datetime.fromisoformat(value)
+
+
+def _ensure_user_exists(db, email: str) -> dict:
+    existing = db.table("users").select("id,email").eq("email", email).execute()
+    if existing.data:
+        return existing.data[0]
+
+    placeholder_hash = hashlib.sha256(f"otp:{email}".encode()).hexdigest()
+    insert_attempts = [
+        {
+            "email": email,
+            "password_hash": placeholder_hash,
+            "is_verified": False,
+            "verification_token": None,
+        },
+        {
+            "email": email,
+            "password_hash": placeholder_hash,
+        },
+        {
+            "email": email,
+        },
+    ]
+
+    last_error = None
+    for payload in insert_attempts:
+        try:
+            created = db.table("users").insert(payload).execute()
+            if created.data:
+                return created.data[0]
+        except Exception as exc:
+            last_error = exc
+
+    lookup = db.table("users").select("id,email").eq("email", email).execute()
+    if lookup.data:
+        return lookup.data[0]
+
+    if last_error:
+        raise last_error
+    raise Exception("Failed to create or fetch user for OTP flow")
+
+
+def _store_otp_record(db, email: str, otp: str, expires_at: str) -> str:
+    # Always keep a process-local backup so OTP verify can still work when
+    # schema is partially migrated.
+    _store_otp_in_memory(email, otp, expires_at)
+
     try:
+        db.table("otp_verifications").upsert(
+            {
+                "email": email,
+                "otp": otp,
+                "otp_expires_at": expires_at,
+            },
+            on_conflict="email",
+        ).execute()
+        return "otp_verifications"
+    except Exception:
+        pass
+
+    try:
+        _ensure_user_exists(db, email)
+        token_value = f"{otp}|{expires_at}"
+        try:
+            db.table("users").update(
+                {
+                    "verification_token": token_value,
+                    "updated_at": datetime.utcnow().isoformat(),
+                }
+            ).eq("email", email).execute()
+        except Exception:
+            db.table("users").update(
+                {
+                    "verification_token": token_value,
+                }
+            ).eq("email", email).execute()
+        return "users.verification_token"
+    except Exception:
+        return "memory"
+
+
+def _load_otp_record(db, email: str) -> dict | None:
+    try:
+        result = db.table("otp_verifications").select("otp,otp_expires_at").eq("email", email).limit(1).execute()
+        if result.data:
+            record = result.data[0]
+            otp_value = record.get("otp")
+            expires = record.get("otp_expires_at")
+            if otp_value and expires:
+                return {
+                    "otp": otp_value,
+                    "otp_expires_at": expires,
+                    "source": "otp_verifications",
+                }
+    except Exception:
+        pass
+
+    try:
+        result = db.table("users").select("verification_token").eq("email", email).limit(1).execute()
+        if result.data:
+            token = result.data[0].get("verification_token")
+            otp_value, expires = _parse_verification_token(token)
+            if otp_value and expires:
+                return {
+                    "otp": otp_value,
+                    "otp_expires_at": expires,
+                    "source": "users.verification_token",
+                }
+    except Exception:
+        pass
+
+    memory_record = _load_otp_from_memory(email)
+    if memory_record:
+        return {
+            "otp": memory_record["otp"],
+            "otp_expires_at": memory_record["otp_expires_at"],
+            "source": "memory",
+        }
+    return None
+
+
+def _clear_otp_record(db, email: str, source: str) -> None:
+    _clear_otp_from_memory(email)
+    if source == "otp_verifications":
+        try:
+            db.table("otp_verifications").delete().eq("email", email).execute()
+        except Exception:
+            pass
+    elif source == "users.verification_token":
+        try:
+            db.table("users").update(
+                {
+                    "verification_token": None,
+                    "updated_at": datetime.utcnow().isoformat(),
+                }
+            ).eq("email", email).execute()
+        except Exception:
+            try:
+                db.table("users").update(
+                    {
+                        "verification_token": None,
+                    }
+                ).eq("email", email).execute()
+            except Exception:
+                pass
+
+def send_otp_email(email: str, otp: str) -> tuple[bool, str]:
+    try:
+        from utils.logger import app_logger
         import smtplib
         from email.mime.text import MIMEText
         from email.mime.multipart import MIMEMultipart
 
+        sender_email = os.getenv("EMAIL_ADDRESS")
+        sender_password = os.getenv("EMAIL_PASSWORD")
+        
+        if not sender_email or sender_email.startswith('your_'):
+            return False, "Email not configured - set EMAIL_ADDRESS in .env"
+        if not sender_password or sender_password.startswith('your_'):
+            return False, "Email password not configured - set EMAIL_PASSWORD in .env"
+
         msg = MIMEMultipart()
-        msg['From'] = os.getenv("EMAIL_ADDRESS")
+        msg['From'] = sender_email
         msg['To'] = email
         msg['Subject'] = "SmartShop AI - Your OTP Code"
         body = f"""
@@ -37,69 +226,97 @@ def send_otp_email(email: str, otp: str) -> bool:
         msg.attach(MIMEText(body, 'html'))
         server = smtplib.SMTP('smtp.gmail.com', 587)
         server.starttls()
-        server.login(os.getenv("EMAIL_ADDRESS"), os.getenv("EMAIL_PASSWORD"))
-        server.sendmail(os.getenv("EMAIL_ADDRESS"), email, msg.as_string())
+        server.login(sender_email, sender_password)
+        server.sendmail(sender_email, email, msg.as_string())
         server.quit()
-        return True
+        return True, "OTP sent successfully"
     except Exception as e:
-        print(f"Email error: {e}")
-        return False
+        from utils.logger import app_logger
+        error_msg = f"Email error: {str(e)}"
+        app_logger.error(error_msg)
+        return False, error_msg
 
 def request_otp(email: str) -> dict:
     try:
+        from utils.logger import app_logger
         db = get_supabase()
         otp = generate_otp()
         expires_at = (datetime.now() + timedelta(minutes=10)).isoformat()
 
-        existing = db.table("users").select("*").eq("email", email).execute()
-        if existing.data:
-            db.table("users").update({
-                "otp": otp,
-                "otp_expires_at": expires_at
-            }).eq("email", email).execute()
-        else:
-            db.table("users").insert({
-                "email": email,
-                "otp": otp,
-                "otp_expires_at": expires_at
-            }).execute()
+        otp_store_source = _store_otp_record(db, email, otp, expires_at)
 
-        sent = send_otp_email(email, otp)
+        sent, message = send_otp_email(email, otp)
         if sent:
+            app_logger.info(f"OTP successfully sent to {email} (stored via {otp_store_source})")
             return {"success": True, "message": "OTP sent to your email!"}
         else:
-            return {"success": False, "error": "Failed to send OTP email"}
+            app_logger.warning(f"OTP email failed for {email}: {message}")
+            return {"success": False, "error": message}
     except Exception as e:
+        from utils.logger import app_logger
+        app_logger.error(f"OTP request failed: {str(e)}")
         return {"success": False, "error": str(e)}
 
 def verify_otp(email: str, otp: str) -> dict:
     try:
+        from utils.logger import app_logger
         db = get_supabase()
-        result = db.table("users").select("*").eq("email", email).execute()
 
-        if not result.data:
-            return {"success": False, "error": "User not found"}
+        record = _load_otp_record(db, email)
+        if not record:
+            return {"success": False, "error": "OTP not found. Request a new one"}
 
-        user = result.data[0]
-
-        if user["otp"] != otp:
+        if record["otp"] != otp:
             return {"success": False, "error": "Invalid OTP"}
 
-        expires_at = datetime.fromisoformat(user["otp_expires_at"])
-        if datetime.now() > expires_at:
+        expires_at = _parse_iso_datetime(record["otp_expires_at"])
+        now = datetime.now(expires_at.tzinfo) if expires_at.tzinfo else datetime.now()
+        if now > expires_at:
             return {"success": False, "error": "OTP expired. Request a new one"}
 
-        db.table("users").update({
-            "otp": None,
-            "otp_expires_at": None
-        }).eq("email", email).execute()
+        _clear_otp_record(db, email, record["source"])
+
+        try:
+            user = _ensure_user_exists(db, email)
+        except Exception as user_exc:
+            app_logger.warning(
+                "OTP verified but user upsert failed for %s: %s",
+                email,
+                str(user_exc),
+            )
+            user = {
+                "id": email,
+                "email": email,
+            }
+
+        # ✅ Create default wishlist if doesn't exist
+        user_id = user.get("id", email)
+        try:
+            wishlist_check = db.table('wishlists')\
+                .select('id')\
+                .eq('user_id', user_id)\
+                .eq('is_default', True)\
+                .execute()
+            
+            if not wishlist_check.data:
+                db.table('wishlists').insert({
+                    'user_id': user_id,
+                    'name': 'My Wishlist',
+                    'is_default': True,
+                    'is_public': False
+                }).execute()
+                app_logger.info(f"✅ Default wishlist created for {email}")
+        except Exception as wl_exc:
+            app_logger.warning(f"Failed to create default wishlist: {wl_exc}")
 
         return {
             "success": True,
-            "user_id": user["id"],
-            "email": user["email"]
+            "user_id": user_id,
+            "email": user.get("email", email)
         }
     except Exception as e:
+        from utils.logger import app_logger
+        app_logger.error(f"OTP verify failed: {str(e)}")
         return {"success": False, "error": str(e)}
 
 def save_tracked_product(user_id: str, product_name: str, price: str, url: str, platform: str = "Amazon") -> bool:

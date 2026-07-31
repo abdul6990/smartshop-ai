@@ -1,0 +1,174 @@
+================================================================================
+                    SMARTSHOP AI - REVISED PROJECT MODEL
+================================================================================
+
+DATE: 2026-04-02
+MODEL VERSION: DIRECT-LINK + EXPLAINABLE DEAL SIGNALS
+
+WHY WE REVISED THE MODEL:
+=========================
+
+Affiliate onboarding portals are not reliably accessible in your environment.
+The project must work without depending on affiliate registration links.
+
+NEW CORE MODEL:
+===============
+
+1. DIRECT-LINK FIRST (NO BLOCKER DEPENDENCY)
+   - Recommendations return direct store URL from tracked prices.
+   - Users can still click and buy immediately.
+   - Affiliate tags are optional and can be added later.
+
+2. EXPLAINABLE DEAL-SIGNAL ENGINE
+   - Real/fake discount detection is done by deterministic rules.
+   - No opaque black-box scoring required.
+   - Output labels:
+     - GENUINE_BARGAIN
+     - FAKE_DISCOUNT
+     - NORMAL
+     - INSUFFICIENT_DATA
+
+3. AI IS OPTIONAL, NOT REQUIRED
+   - LLM remains supported, but the system works without it.
+   - Cohere model is now configurable via env variable.
+   - Core recommendation path uses historical price logic.
+
+================================================================================
+
+TECHNICAL RULES (DEAL CLASSIFIER):
+==================================
+
+Rule A: GENUINE_BARGAIN
+IF current_price < (0.9 * average_30_day_price)
+AND current_price <= min_30_day_price
+THEN label = GENUINE_BARGAIN
+
+Rule B: FAKE_DISCOUNT
+IF current_price < (0.9 * previous_day_price)
+AND previous_day_price > (1.2 * average_30_day_price)
+THEN label = FAKE_DISCOUNT
+
+Else:
+label = NORMAL
+
+================================================================================
+
+WHAT CHANGED IN BACKEND:
+========================
+
+1. Added deal signal engine:
+   - File: agents/deal_signal.py
+   - Functions:
+     - evaluate_deal_signal(...)
+     - evaluate_from_history(...)
+
+2. Updated price tracking logic:
+   - File: agents/price_tracker.py
+   - get_price_history now returns:
+     - deal_signal
+     - deal_score
+   - should_buy_now now factors fake-discount/genuine-bargain logic.
+
+3. Added direct buy URL in recommendations:
+   - File: agents/recommendation_engine.py
+   - Recommendation items now include buy_url.
+   - URL is selected from lowest in-stock product_prices row.
+
+4. Added new API endpoint:
+   - File: api.py
+   - GET /api/price-tracker/deal-signal
+   - Returns deal label, score, recommendation, and key metrics.
+
+5. Model configuration is now flexible:
+   - File: agents/ai_predictor.py
+   - COHERE_MODEL_NAME from env replaces hardcoded model.
+
+6. Dependencies:
+   - Added cloudscraper to requirements.txt
+
+================================================================================
+
+CURRENT ARCHITECTURE (REVISED):
+===============================
+
+Mobile App (React Native)
+    -> FastAPI Endpoints
+        -> Price Tracker + Deal Signal Engine
+            -> Supabase price history
+            -> Redis cache
+        -> Recommendation Engine (with direct buy_url)
+
+Optional layers:
+- Tavily market context
+- Cohere LLM summary
+- Affiliate tags (future, optional)
+
+================================================================================
+
+REVISED PHASE PLAN:
+===================
+
+PHASE 1 (NOW): STABLE CORE
+- Keep Docker services up (Postgres + Redis)
+- Ensure price history collection is stable
+- Expose and validate deal-signal endpoint
+- Keep recommendation output direct-link based
+
+PHASE 2: QUALITY + COVERAGE
+- Improve scraper resilience (cloudscraper + retry + jitter)
+- Track high-volatility categories first:
+  - Smartphones
+  - Laptops
+- Add price aggregation to avoid duplicate unchanged records
+
+PHASE 3: OPTIONAL MONETIZATION
+- If affiliate links become accessible later:
+  - Add tags to buy_url as optional layer
+  - Keep direct-link fallback always enabled
+
+================================================================================
+
+DOCKER STATUS WORKFLOW:
+=======================
+
+1. Start infrastructure:
+   docker run -d --name smartshop-db ... postgres:16-alpine
+   docker run -d --name smartshop-redis ... redis:7-alpine
+
+2. Verify:
+   docker ps
+   docker exec smartshop-db pg_isready -U smartshop_user
+   docker exec smartshop-redis redis-cli ping
+
+3. Run API:
+   uvicorn api:app --host 0.0.0.0 --port 8000
+
+4. Check endpoints:
+   GET /health
+   GET /api/price-tracker/history
+   GET /api/price-tracker/recommendation
+   GET /api/price-tracker/deal-signal
+
+================================================================================
+
+SUCCESS CRITERIA FOR THIS MODEL:
+================================
+
+- System works even when affiliate portals are blocked
+- Deal quality is explainable to users
+- Recommendations always include actionable buy_url
+- No paid dependency is required for core operation
+
+================================================================================
+
+BOTTOM LINE:
+============
+
+This project is now revised to a robust, no-blocker model:
+- Works without affiliate onboarding
+- Uses transparent pricing logic
+- Keeps future monetization optional
+
+SmartShop AI remains useful, shippable, and student-budget friendly.
+
+================================================================================

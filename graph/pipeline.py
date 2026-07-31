@@ -17,8 +17,11 @@ class PriceAgentState(TypedDict):
 
     # Agent 1 outputs
     products_found: list
+    best_5_products: list
+    all_products: list
     alternatives_found: list
     search_query: str
+    total_found: int
 
     # Agent 2 outputs
     price_history: list
@@ -65,8 +68,11 @@ def run_price_pipeline(product_name: str, user_email: str) -> dict:
         "product_name": product_name,
         "user_email": user_email,
         "products_found": [],
+        "best_5_products": [],
+        "all_products": [],
         "alternatives_found": [],
         "search_query": "",
+        "total_found": 0,
         "price_history": [],
         "best_price_data": [],
         "upcoming_sales": [],
@@ -76,3 +82,28 @@ def run_price_pipeline(product_name: str, user_email: str) -> dict:
     })
 
     return result
+
+
+if __name__ == "__main__":
+    import sys
+    import json
+    
+    # Simple CLI for testing the pipeline
+    test_product = sys.argv[1] if len(sys.argv) > 1 else "iphone 14 pro"
+    test_email = sys.argv[2] if len(sys.argv) > 2 else "admin@smartshop.ai"
+    
+    print(f"\n🚀 Starting Price Intelligence Pipeline for: {test_product}")
+    print(f"📧 User Email: {test_email}\n")
+    
+    try:
+        final_state = run_price_pipeline(test_product, test_email)
+        
+        print("\n✅ Pipeline complete! Results summary:")
+        print(f"   - Products Found: {len(final_state.get('products_found', []))}")
+        print(f"   - Best Price: ₹{final_state.get('best_5_products', [{}])[0].get('price', 'N/A')}")
+        print(f"   - AI Prediction: {final_state.get('ai_prediction', 'N/A')[:100]}...")
+        print(f"   - Alert Status: {final_state.get('alert_status')}\n")
+        
+    except Exception as e:
+        print(f"\n❌ Pipeline failed: {str(e)}")
+        sys.exit(1)

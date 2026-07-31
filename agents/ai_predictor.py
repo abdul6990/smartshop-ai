@@ -1,88 +1,101 @@
+"""
+Agent 4: AI Predictor
+Uses Cohere LLM to analyze data and provide recommendations
+"""
 from langchain_cohere import ChatCohere
 from langchain_core.messages import HumanMessage, SystemMessage
+from utils.logger import app_logger
 import os
 
 def run_ai_predictor(state: dict) -> dict:
     """
     Agent 4: AI Predictor
-    Analyzes ALL data from previous agents
-    and gives buy/wait recommendation
+    Analyzes all data and provides buy/wait recommendation
     """
-    llm = ChatCohere(
-        cohere_api_key=os.getenv("COHERE_API_KEY"),
-        model="command-r-plus-08-2024"
-    )
+    try:
+        product_name = state.get("product_name", "").strip()
+        
+        if not product_name:
+            app_logger.warning("Agent 4: No product name provided")
+            return {
+                "ai_prediction": "Unable to analyze: No product data",
+                "error": "No product name"
+            }
+        
+        app_logger.info(f"Agent 4: Analyzing data for '{product_name}'")
 
-    product_name = state["product_name"]
+        model_name = os.getenv("COHERE_MODEL_NAME", "command-r-plus-08-2024")
+        
+        llm = ChatCohere(
+            cohere_api_key=os.getenv("COHERE_API_KEY"),
+            model=model_name
+        )
+        
+        # Compile all data
+        products_info = "\n".join([
+            f"- {p.get('title', 'N/A')} | Price: {p.get('price', 'N/A')} | Rating: {p.get('rating', 'N/A')} | Platform: {p.get('platform', 'N/A')}"
+            for p in state.get("products_found", [])[:5]
+        ]) or "No products found"
+        
+        history_info = "\n".join([
+            f"- {h.get('title', 'N/A')}: {h.get('snippet', 'N/A')[:150]}"
+            for h in state.get("price_history", [])[:3]
+        ]) or "No price history available"
+        
+        market_info = "\n".join([
+            f"- {s.get('title', 'N/A')}: {s.get('snippet', 'N/A')[:150]}"
+            for s in state.get("upcoming_sales", [])[:3]
+        ]) or "No upcoming sales data"
+        
+        deals_info = "\n".join([
+            f"- {d.get('title', 'N/A')}: {d.get('snippet', 'N/A')[:150]}"
+            for d in state.get("product_deals", [])[:3]
+        ]) or "No deals found"
+        
+        try:
+            response = llm.invoke([
+                SystemMessage(content="""You are an expert AI shopping analyst for Indian consumers in 2026.
+You analyze product prices and give clear, actionable recommendations.
+Always mention prices in INR and be transparent about data availability.
+Today's year is 2026."""),
+                
+                HumanMessage(content=f"""Analyze this data for '{product_name}' and give recommendation:
 
-    print(f"\n🤖 Agent 4: AI analyzing data for '{product_name}'...")
-
-    # Compile all data from previous agents
-    products_info = "\n".join([
-    f"- {p['title']} | Price: {p.get('price','N/A')} | Rating: {p.get('rating','N/A')} | Reviews: {p.get('reviews','N/A')}"
-    for p in state.get("products_found", [])
-])
-
-    history_info = "\n".join([
-        f"- {h['title']}: {h['content'][:200]}"
-        for h in state.get("price_history", [])
-    ])
-
-    market_info = "\n".join([
-        f"- {s['title']}: {s['content'][:200]}"
-        for s in state.get("upcoming_sales", [])
-    ])
-
-    deals_info = "\n".join([
-        f"- {d['title']}: {d['content'][:200]}"
-        for d in state.get("product_deals", [])
-    ])
-
-    alternatives_info = "\n".join([
-    f"- {a['title']} | Price: {a.get('price','N/A')} | Rating: {a.get('rating','N/A')}"
-    for a in state.get("alternatives_found", [])
-])
-
-    # Ask LLM to analyze everything
-    response = llm.invoke([
-        SystemMessage(content="""You are an expert AI shopping analyst for Indian consumers in 2026.
-You analyze product prices from multiple sources and give clear recommendations.
-When prices are inconsistent across sources:
-- Always mention the RANGE (lowest to highest found)
-- Recommend checking Amazon.in directly for real-time price
-- Be transparent that prices vary by seller
-Always mention prices in INR. Today's year is 2026."""),
-
-        HumanMessage(content=f"""Analyze this data for '{product_name}' and give a complete recommendation:
-
-CURRENT PRODUCT DATA:
+CURRENT PRODUCTS:
 {products_info}
 
 PRICE HISTORY:
 {history_info}
 
-UPCOMING SALES & MARKET:
+UPCOMING SALES:
 {market_info}
 
-PRODUCT SPECIFIC DEALS:
+PRODUCT DEALS:
 {deals_info}
 
-CHEAPER ALTERNATIVES:
-{alternatives_info}
-
 Give me:
-1. CURRENT PRICE: What is the current price on Amazon India?
-2. HISTORICAL LOW: What was the lowest price ever?
-3. BUY OR WAIT: Should I buy now or wait? (be specific)
-4. BEST TIME TO BUY: When exactly should I buy?
-5. UPCOMING SALES: Any sales coming up I should wait for?
-6. CHEAPER ALTERNATIVES: Better value options?
-7. OVERALL RECOMMENDATION: Final advice in 2 sentences
+1. CURRENT PRICE
+2. HISTORICAL LOW
+3. BUY OR WAIT
+4. BEST TIME TO BUY
+5. RECOMMENDATION (2 sentences)
 
-Format your response clearly with these exact headings.""")
-    ])
-
-    prediction = response.content
-    print(f"✅ Agent 4 done!")
-
-    return {"ai_prediction": prediction}
+Format clearly with these headings.""")
+            ])
+            
+            prediction = response.content
+            app_logger.info("Agent 4 complete")
+            
+            return {"ai_prediction": prediction}
+            
+        except Exception as e:
+            app_logger.warning(f"LLM call failed: {str(e)}, returning generic recommendation")
+            generic_rec = f"Based on current market data for {product_name}:\n1. Check actual prices on Amazon.in\n2. Consider waiting for upcoming sales\n3. Compare with alternatives\nRecommendation: Monitor prices for next 2 weeks before deciding."
+            return {"ai_prediction": generic_rec}
+        
+    except Exception as e:
+        app_logger.error(f"Agent 4 error: {str(e)}", exc_info=True)
+        return {
+            "ai_prediction": "Unable to generate recommendation due to technical error",
+            "error": str(e)
+        }
