@@ -202,6 +202,7 @@ def send_otp_email(email: str, otp: str) -> tuple[bool, str]:
         import smtplib
         from email.mime.text import MIMEText
         from email.mime.multipart import MIMEMultipart
+        from socket import timeout as SocketTimeout
 
         sender_email = os.getenv("EMAIL_ADDRESS")
         sender_password = os.getenv("EMAIL_PASSWORD")
@@ -224,23 +225,49 @@ def send_otp_email(email: str, otp: str) -> tuple[bool, str]:
         </body></html>
         """
         msg.attach(MIMEText(body, 'html'))
-        server = smtplib.SMTP('smtp.gmail.com', 587)
-        server.starttls()
-        server.login(sender_email, sender_password)
-        server.sendmail(sender_email, email, msg.as_string())
-        server.quit()
-        return True, "OTP sent successfully"
+        message = msg.as_string()
+
+        # Try Gmail SMTP on the two common ports. Some hosting providers
+        # allow one path but not the other.
+        attempts = [
+            ("smtp.gmail.com", 587, "starttls"),
+            ("smtp.gmail.com", 465, "ssl"),
+        ]
+
+        last_error = None
+        for host, port, mode in attempts:
+            try:
+                if mode == "ssl":
+                    with smtplib.SMTP_SSL(host, port, timeout=20) as server:
+                        server.login(sender_email, sender_password)
+                        server.sendmail(sender_email, email, message)
+                else:
+                    with smtplib.SMTP(host, port, timeout=20) as server:
+                        server.starttls()
+                        server.login(sender_email, sender_password)
+                        server.sendmail(sender_email, email, message)
+                return True, "OTP sent successfully"
+            except (OSError, smtplib.SMTPException, SocketTimeout) as exc:
+                last_error = exc
+                app_logger.warning(
+                    "OTP send attempt failed via %s:%s (%s): %s",
+                    host,
+                    port,
+                    mode,
+                    str(exc),
+                )
+
+        if last_error:
+            raise last_error
+        return False, "Email delivery failed"
     except Exception as e:
-        # If email sending fails (network or SMTP issues), log the OTP and
-        # return a successful result for debugging/testing so the in-memory
-        # OTP flow remains usable. For production, prefer a transactional
-        # email provider (SendGrid/Mailgun) or ensure SMTP egress is allowed.
+        # Email must actually be delivered for login to work in production.
+        # If SMTP is blocked by hosting or credentials are wrong, return a
+        # failure so the frontend can show the real problem.
         from utils.logger import app_logger
         error_msg = f"Email error: {str(e)}"
         app_logger.error(error_msg)
-        app_logger.warning(f"OTP delivery failed for {email}. OTP={otp} (logged for debugging).")
-        # Keep OTP stored in memory by the caller; return success so tests can proceed.
-        return True, f"OTP stored on server; email send failed ({str(e)})"
+        return False, error_msg
 
 def request_otp(email: str) -> dict:
     try:
