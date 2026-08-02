@@ -201,6 +201,7 @@ def send_otp_email(email: str, otp: str) -> tuple[bool, str]:
         from utils.logger import app_logger
         import json
         import smtplib
+        import urllib.error
         import urllib.request
         from email.mime.text import MIMEText
         from email.mime.multipart import MIMEMultipart
@@ -208,8 +209,15 @@ def send_otp_email(email: str, otp: str) -> tuple[bool, str]:
         # Preferred: transactional email provider over HTTPS (works better on Render).
         # If RESEND_API_KEY is set, send the OTP using Resend.
         resend_api_key = os.getenv("RESEND_API_KEY")
-        resend_from = os.getenv("RESEND_FROM_EMAIL") or os.getenv("EMAIL_ADDRESS")
-        if resend_api_key and resend_from:
+        resend_from = (os.getenv("RESEND_FROM_EMAIL") or "").strip()
+
+        # A Resend account without a verified domain can use this sender for
+        # testing, but Resend only permits delivery to the account owner's
+        # email address in that mode.
+        if "your-verified-domain.com" in resend_from:
+            resend_from = ""
+        if resend_api_key:
+            resend_from = resend_from or "SmartShop AI <onboarding@resend.dev>"
             payload = json.dumps({
                 "from": resend_from,
                 "to": [email],
@@ -241,6 +249,18 @@ def send_otp_email(email: str, otp: str) -> tuple[bool, str]:
                     if 200 <= response.status < 300:
                         return True, "OTP sent successfully"
                     return False, f"Resend API returned HTTP {response.status}"
+            except urllib.error.HTTPError as exc:
+                # Include Resend's safe API error message so a deployment can
+                # distinguish an invalid key from an unverified sender or an
+                # unauthorised test recipient.
+                response_body = exc.read().decode("utf-8", errors="replace")
+                app_logger.warning(
+                    "Resend email send failed for %s: HTTP %s: %s",
+                    email,
+                    exc.code,
+                    response_body,
+                )
+                return False, f"Resend email delivery failed ({exc.code}): {response_body}"
             except Exception as exc:
                 app_logger.warning("Resend email send failed for %s: %s", email, str(exc))
                 # Do not fall back to SMTP: Render free services block SMTP
