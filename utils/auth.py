@@ -199,10 +199,53 @@ def _clear_otp_record(db, email: str, source: str) -> None:
 def send_otp_email(email: str, otp: str) -> tuple[bool, str]:
     try:
         from utils.logger import app_logger
+        import json
         import smtplib
+        import urllib.request
         from email.mime.text import MIMEText
         from email.mime.multipart import MIMEMultipart
-        from socket import timeout as SocketTimeout
+
+        # Preferred: transactional email provider over HTTPS (works better on Render).
+        # If RESEND_API_KEY is set, send the OTP using Resend.
+        resend_api_key = os.getenv("RESEND_API_KEY")
+        resend_from = os.getenv("RESEND_FROM_EMAIL") or os.getenv("EMAIL_ADDRESS")
+        if resend_api_key and resend_from:
+            payload = json.dumps({
+                "from": resend_from,
+                "to": [email],
+                "subject": "SmartShop AI - Your OTP Code",
+                "html": f"""
+                <html><body style="font-family: Arial; background: #0A0A0F; color: white; padding: 20px;">
+                <h2 style="color: #7C3AED;">SmartShop AI 🛒</h2>
+                <p>Your verification code is:</p>
+                <h1 style="color: #06B6D4; font-size: 48px; letter-spacing: 10px;">{otp}</h1>
+                <p style="color: #94A3B8;">This code expires in 10 minutes.</p>
+                </body></html>
+                """,
+            }).encode("utf-8")
+
+            req = urllib.request.Request(
+                "https://api.resend.com/emails",
+                data=payload,
+                headers={
+                    "Authorization": f"Bearer {resend_api_key}",
+                    "Content-Type": "application/json",
+                    # Resend rejects direct HTTP requests without this header.
+                    "User-Agent": "smartshop-ai/1.0",
+                },
+                method="POST",
+            )
+
+            try:
+                with urllib.request.urlopen(req, timeout=20) as response:
+                    if 200 <= response.status < 300:
+                        return True, "OTP sent successfully"
+                    return False, f"Resend API returned HTTP {response.status}"
+            except Exception as exc:
+                app_logger.warning("Resend email send failed for %s: %s", email, str(exc))
+                # Do not fall back to SMTP: Render free services block SMTP
+                # ports and that obscures the useful Resend error.
+                return False, f"Resend email delivery failed: {str(exc)}"
 
         sender_email = os.getenv("EMAIL_ADDRESS")
         sender_password = os.getenv("EMAIL_PASSWORD")
@@ -225,10 +268,6 @@ def send_otp_email(email: str, otp: str) -> tuple[bool, str]:
         </body></html>
         """
         msg.attach(MIMEText(body, 'html'))
-        message = msg.as_string()
-
-        # Try Gmail SMTP on the two common ports. Some hosting providers
-        # allow one path but not the other.
         attempts = [
             ("smtp.gmail.com", 587, "starttls"),
             ("smtp.gmail.com", 465, "ssl"),
@@ -240,30 +279,21 @@ def send_otp_email(email: str, otp: str) -> tuple[bool, str]:
                 if mode == "ssl":
                     with smtplib.SMTP_SSL(host, port, timeout=20) as server:
                         server.login(sender_email, sender_password)
-                        server.sendmail(sender_email, email, message)
+                        server.sendmail(sender_email, email, msg.as_string())
                 else:
                     with smtplib.SMTP(host, port, timeout=20) as server:
                         server.starttls()
                         server.login(sender_email, sender_password)
-                        server.sendmail(sender_email, email, message)
+                        server.sendmail(sender_email, email, msg.as_string())
                 return True, "OTP sent successfully"
-            except (OSError, smtplib.SMTPException, SocketTimeout) as exc:
+            except Exception as exc:
                 last_error = exc
-                app_logger.warning(
-                    "OTP send attempt failed via %s:%s (%s): %s",
-                    host,
-                    port,
-                    mode,
-                    str(exc),
-                )
+                app_logger.warning("OTP send attempt failed via %s:%s (%s): %s", host, port, mode, str(exc))
 
         if last_error:
             raise last_error
         return False, "Email delivery failed"
     except Exception as e:
-        # Email must actually be delivered for login to work in production.
-        # If SMTP is blocked by hosting or credentials are wrong, return a
-        # failure so the frontend can show the real problem.
         from utils.logger import app_logger
         error_msg = f"Email error: {str(e)}"
         app_logger.error(error_msg)
